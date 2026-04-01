@@ -1,18 +1,16 @@
-"""Group and channel lifecycle management handlers.
-
-This module focuses on:
-- tracking when the bot is added to/removed from groups and channels;
-- exposing an admin-only `/groups` command to list manageable targets.
-"""
+"""Group and channel lifecycle management handlers (aiogram 3.x)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol, Sequence
+from typing import Protocol, Sequence, cast
 
-from telegram import Chat, Update
-from telegram.ext import ContextTypes
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Chat, ChatMemberUpdated, Message
+
+router = Router(name="group_management")
 
 from bot.utils import escape_html, html_code
 
@@ -66,28 +64,34 @@ def _build_managed_chat(chat: Chat) -> ManagedChat:
     )
 
 
+def _resolve_group_repository(
+    message_or_event: Message | ChatMemberUpdated,
+    group_repository: GroupRepository | None,
+) -> GroupRepository | None:
+    if group_repository is not None:
+        return group_repository
+
+    bot = message_or_event.bot
+    return cast(GroupRepository | None, bot.get("group_repository"))
+
+
+@router.my_chat_member()
 async def handle_bot_membership_change(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    event: ChatMemberUpdated,
+    group_repository: GroupRepository | None = None,
 ) -> None:
-    """Track when the bot is added/removed from groups or channels.
+    """Track when the bot is added/removed from groups or channels."""
 
-    Expected context values:
-    - `group_repository`: implementation of :class:`GroupRepository`.
-    """
-
-    membership_update = update.my_chat_member
-    if not membership_update:
-        return
-
-    chat = membership_update.chat
+    chat = event.chat
     if chat.type not in {"group", "supergroup", "channel"}:
         return
 
-    repository: GroupRepository = context.application.bot_data["group_repository"]
+    repository = _resolve_group_repository(event, group_repository)
+    if repository is None:
+        return
 
-    old_status = membership_update.old_chat_member.status
-    new_status = membership_update.new_chat_member.status
+    old_status = event.old_chat_member.status
+    new_status = event.new_chat_member.status
 
     became_active = old_status in {"left", "kicked"} and new_status in {
         "member",
@@ -101,30 +105,27 @@ async def handle_bot_membership_change(
         await repository.mark_inactive(chat.id, _now())
 
 
-async def list_groups_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin-only `/groups` command.
+@router.message(Command("groups"))
+async def list_groups_command(
+    message: Message,
+    is_admin: bool = False,
+    group_repository: GroupRepository | None = None,
+) -> None:
+    """Admin-only `/groups` command."""
 
-    Expected context values:
-    - `group_repository`: implementation of :class:`GroupRepository`.
-    - `admin_verifier`: implementation of :class:`AdminVerifier`.
-    """
-
-    message = update.effective_message
-    user = update.effective_user
-    if not message or not user:
-        return
-
-    verifier: AdminVerifier = context.application.bot_data["admin_verifier"]
-    is_admin = await verifier.is_platform_admin(user.id)
     if not is_admin:
-        await message.reply_text("❌ This command is restricted to platform admins.")
+        await message.answer("❌ This command is restricted to platform admins.")
         return
 
-    repository: GroupRepository = context.application.bot_data["group_repository"]
+    repository = _resolve_group_repository(message, group_repository)
+    if repository is None:
+        await message.answer("⚠️ Group repository is not configured.")
+        return
+
     chats = await repository.list_active_chats()
 
     if not chats:
-        await message.reply_text("No active groups/channels are currently registered.")
+        await message.answer("No active groups/channels are currently registered.")
         return
 
     lines = ["Manageable groups/channels:"]

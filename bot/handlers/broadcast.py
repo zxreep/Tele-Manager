@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Protocol, Sequence
+from typing import Iterable, Protocol, cast
 
-from telegram import Update
-from telegram.error import TelegramError
-from telegram.ext import ContextTypes
+from aiogram import Bot, Router
+from aiogram.filters import Command
+from aiogram.exceptions import TelegramAPIError
+from aiogram.types import Message
 
-from bot.handlers.group_management import AdminVerifier, GroupRepository, ManagedChat
-from bot.utils import escape_html, html_code
+from bot.handlers.group_management import GroupRepository, ManagedChat
+
+router = Router(name="broadcast")
 
 
 @dataclass(slots=True)
@@ -50,9 +52,24 @@ def _split_command_payload(text: str) -> tuple[str, str] | None:
     return parts[1], parts[2]
 
 
+def _resolve_group_repository(bot: Bot, repo: GroupRepository | None) -> GroupRepository | None:
+    if repo is not None:
+        return repo
+    return cast(GroupRepository | None, bot.get("group_repository"))
+
+
+def _resolve_target_repository(
+    bot: Bot,
+    repo: BroadcastTargetRepository | None,
+) -> BroadcastTargetRepository | None:
+    if repo is not None:
+        return repo
+    return cast(BroadcastTargetRepository | None, bot.get("broadcast_target_repository"))
+
+
 async def _run_batched_send(
     *,
-    bot,
+    bot: Bot,
     target_ids: Iterable[int],
     message: str,
     target_repo: BroadcastTargetRepository,
@@ -85,7 +102,7 @@ async def _run_batched_send(
 
                 try:
                     await bot.send_message(chat_id=chat_id, text=message)
-                except TelegramError as exc:
+                except TelegramAPIError as exc:
                     success = False
                     error = str(exc)
 
@@ -108,40 +125,27 @@ async def _run_batched_send(
                         )
                     )
 
-                # simple global send pacing to reduce risk of Telegram flood limits
                 await asyncio.sleep(min_interval_seconds)
 
     await asyncio.gather(*(worker() for _ in range(max(1, workers))))
     return results
 
 
-async def _ensure_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    message = update.effective_message
-    user = update.effective_user
-    if not message or not user:
-        return False
-
-    verifier: AdminVerifier = context.application.bot_data["admin_verifier"]
-    if await verifier.is_platform_admin(user.id):
-        return True
-
-    await message.reply_text("❌ This command is restricted to platform admins.")
-    return False
-
-
-async def send_one_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+@router.message(Command("send_one"))
+async def send_one_command(
+    message: Message,
+    is_admin: bool = False,
+    broadcast_target_repository: BroadcastTargetRepository | None = None,
+) -> None:
     """`/send_one <chat_id> <message>`"""
 
-    message = update.effective_message
-    if not message:
-        return
-
-    if not await _ensure_admin(update, context):
+    if not is_admin:
+        await message.answer("❌ This command is restricted to platform admins.")
         return
 
     payload = _split_command_payload(message.text or "")
     if not payload:
-        await message.reply_text("Usage: /send_one <chat_id> <message>")
+        await message.answer("Usage: /send_one <chat_id> <message>")
         return
 
     chat_id_raw, body = payload
@@ -151,12 +155,13 @@ async def send_one_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await message.reply_text("chat_id must be an integer.")
         return
 
-    target_repo: BroadcastTargetRepository = context.application.bot_data[
-        "broadcast_target_repository"
-    ]
+    target_repo = _resolve_target_repository(message.bot, broadcast_target_repository)
+    if target_repo is None:
+        await message.answer("⚠️ Broadcast target repository is not configured.")
+        return
 
     result = await _run_batched_send(
-        bot=context.bot,
+        bot=message.bot,
         target_ids=[chat_id],
         message=body,
         target_repo=target_repo,
@@ -176,38 +181,41 @@ async def send_one_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
 
-async def send_many_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+@router.message(Command("send_many"))
+async def send_many_command(
+    message: Message,
+    is_admin: bool = False,
+    broadcast_target_repository: BroadcastTargetRepository | None = None,
+) -> None:
     """`/send_many <chat_id,chat_id,...> <message>`"""
 
-    message = update.effective_message
-    if not message:
-        return
-
-    if not await _ensure_admin(update, context):
+    if not is_admin:
+        await message.answer("❌ This command is restricted to platform admins.")
         return
 
     payload = _split_command_payload(message.text or "")
     if not payload:
-        await message.reply_text("Usage: /send_many <chat_id,chat_id,...> <message>")
+        await message.answer("Usage: /send_many <chat_id,chat_id,...> <message>")
         return
 
     chat_ids_raw, body = payload
     try:
         target_ids = [int(item.strip()) for item in chat_ids_raw.split(",") if item.strip()]
     except ValueError:
-        await message.reply_text("All chat ids must be integers.")
+        await message.answer("All chat ids must be integers.")
         return
 
     if not target_ids:
-        await message.reply_text("At least one chat id is required.")
+        await message.answer("At least one chat id is required.")
         return
 
-    target_repo: BroadcastTargetRepository = context.application.bot_data[
-        "broadcast_target_repository"
-    ]
+    target_repo = _resolve_target_repository(message.bot, broadcast_target_repository)
+    if target_repo is None:
+        await message.answer("⚠️ Broadcast target repository is not configured.")
+        return
 
     results = await _run_batched_send(
-        bot=context.bot,
+        bot=message.bot,
         target_ids=target_ids,
         message=body,
         target_repo=target_repo,
@@ -219,42 +227,48 @@ async def send_many_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     success_count = sum(1 for row in results if row.success)
     failure_count = len(results) - success_count
-    await message.reply_text(
-        f"Completed send_many: success={success_count}, failed={failure_count}."
-    )
+    await message.answer(f"Completed send_many: success={success_count}, failed={failure_count}.")
 
 
-async def broadcast_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+@router.message(Command("broadcast_all"))
+async def broadcast_all_command(
+    message: Message,
+    is_admin: bool = False,
+    group_repository: GroupRepository | None = None,
+    broadcast_target_repository: BroadcastTargetRepository | None = None,
+) -> None:
     """`/broadcast_all <message>` to all active managed groups/channels."""
 
-    message = update.effective_message
-    if not message:
-        return
-
-    if not await _ensure_admin(update, context):
+    if not is_admin:
+        await message.answer("❌ This command is restricted to platform admins.")
         return
 
     raw = message.text or ""
     parts = raw.split(maxsplit=1)
     if len(parts) < 2:
-        await message.reply_text("Usage: /broadcast_all <message>")
+        await message.answer("Usage: /broadcast_all <message>")
         return
     body = parts[1]
 
-    group_repo: GroupRepository = context.application.bot_data["group_repository"]
-    active_targets: Sequence[ManagedChat] = await group_repo.list_active_chats()
+    group_repo = _resolve_group_repository(message.bot, group_repository)
+    if group_repo is None:
+        await message.answer("⚠️ Group repository is not configured.")
+        return
+
+    target_repo = _resolve_target_repository(message.bot, broadcast_target_repository)
+    if target_repo is None:
+        await message.answer("⚠️ Broadcast target repository is not configured.")
+        return
+
+    active_targets: list[ManagedChat] = list(await group_repo.list_active_chats())
     target_ids = [chat.chat_id for chat in active_targets]
 
     if not target_ids:
-        await message.reply_text("No active targets available for broadcast.")
+        await message.answer("No active targets available for broadcast.")
         return
 
-    target_repo: BroadcastTargetRepository = context.application.bot_data[
-        "broadcast_target_repository"
-    ]
-
     results = await _run_batched_send(
-        bot=context.bot,
+        bot=message.bot,
         target_ids=target_ids,
         message=body,
         target_repo=target_repo,
@@ -266,7 +280,6 @@ async def broadcast_all_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     success_count = sum(1 for row in results if row.success)
     failure_count = len(results) - success_count
-    await message.reply_text(
-        f"Broadcast completed for {len(results)} targets: "
-        f"success={success_count}, failed={failure_count}."
+    await message.answer(
+        f"Broadcast completed for {len(results)} targets: success={success_count}, failed={failure_count}."
     )
