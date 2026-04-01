@@ -22,3 +22,4 @@ def iter_router_import_paths(enabled_features: Iterable[str] | None = None) -> l
 
     enabled = set(enabled_features)
     return [path for name, path in ROUTER_REGISTRY.items() if name in enabled]
+"""Message and callback handlers."""
