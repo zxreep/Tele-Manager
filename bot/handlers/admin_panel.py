@@ -86,7 +86,7 @@ def set_admin_panel_storage(custom_storage: AdminPanelStorage) -> None:
     storage = custom_storage
 
 
-def _parse_superadmin_ids(raw_value: Optional[str]) -> Set[int]:
+def _parse_admin_ids(raw_value: Optional[str]) -> Set[int]:
     if not raw_value:
         return set()
 
@@ -102,11 +102,11 @@ def _parse_superadmin_ids(raw_value: Optional[str]) -> Set[int]:
     return result
 
 
-SUPERADMIN_IDS = _parse_superadmin_ids(os.getenv("SUPERADMIN_IDS"))
+ADMIN_IDS = _parse_admin_ids(os.getenv("ADMIN_IDS"))
 
 
 def _is_superadmin(user_id: Optional[int]) -> bool:
-    return bool(user_id and user_id in SUPERADMIN_IDS)
+    return bool(user_id and user_id in ADMIN_IDS)
 
 
 async def _guard_admin(message: Message) -> bool:

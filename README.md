@@ -53,8 +53,8 @@ Use the structure below to keep feature additions isolated and maintainable.
 3. Configure local environment variables:
    ```bash
    export BOT_TOKEN="<telegram-bot-token>"
-   export NEON_DATABASE_URL="<postgres-connection-string>"
-   export SUPERADMIN_IDS="123456789,987654321"
+   export DATABASE_URL="<postgres-connection-string>"
+   export ADMIN_IDS="123456789,987654321"
    export LOG_LEVEL="INFO"
    ```
 4. Run the bot locally:
@@ -67,11 +67,11 @@ Use the structure below to keep feature additions isolated and maintainable.
 1. Create a Neon project and Postgres database.
 2. Create a dedicated database role for the bot with least privileges required for runtime and migrations.
 3. Copy the Neon pooled or direct connection string.
-4. Save it as `NEON_DATABASE_URL` in local shell and in Render environment variables.
+4. Save it as `DATABASE_URL` in local shell and in Render environment variables.
 
 ## Alembic migration run
 
-1. Ensure `NEON_DATABASE_URL` points to the target Neon database.
+1. Ensure `DATABASE_URL` points to the target Neon database.
 2. Run migrations before starting a new deployment:
    ```bash
    alembic upgrade head
@@ -92,8 +92,8 @@ Use the structure below to keep feature additions isolated and maintainable.
    - Start command: `python -m bot.main`
 5. Set environment variables in Render:
    - `BOT_TOKEN`
-   - `NEON_DATABASE_URL`
-   - `SUPERADMIN_IDS`
+   - `DATABASE_URL`
+   - `ADMIN_IDS`
    - `LOG_LEVEL` (e.g. `INFO`)
 6. Create the service and wait for initial build + deploy.
 7. Trigger a manual deploy after each migration if schema changed.
@@ -108,6 +108,6 @@ Use the structure below to keep feature additions isolated and maintainable.
 
 ### Startup DB connectivity check
 
-- On startup, attempt a lightweight connectivity probe (e.g., `SELECT 1`) using `NEON_DATABASE_URL`.
+- On startup, attempt a lightweight connectivity probe (e.g., `SELECT 1`) using `DATABASE_URL`.
 - Exit with a non-zero code if the check fails so Render marks the deployment unhealthy and retries according to its policy.
 - Log success/failure of the DB check as a structured startup event.

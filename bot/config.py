@@ -1,7 +1,8 @@
 """Project configuration and feature flags."""
 
-from dataclasses import dataclass
+import logging
 import os
+from dataclasses import dataclass
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
@@ -23,9 +24,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+logger = logging.getLogger(__name__)
+
+
 class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
-    database_url: str = Field(default="sqlite+aiosqlite:///./tele_manager.db", alias="DATABASE_URL")
+    database_url: str = Field(alias="DATABASE_URL")
     admin_ids: list[int] = Field(default_factory=list, alias="ADMIN_IDS")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
@@ -34,3 +38,12 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_required_env_vars() -> None:
+    required_env_vars = ["BOT_TOKEN", "DATABASE_URL"]
+    missing = [name for name in required_env_vars if not os.getenv(name)]
+    if missing:
+        missing_list = ", ".join(missing)
+        logger.critical("Missing required environment variables: %s", missing_list)
+        raise RuntimeError(f"Missing required environment variables: {missing_list}")

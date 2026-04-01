@@ -5,9 +5,9 @@ from sqlalchemy.orm import sessionmaker
 
 
 def get_database_url() -> str:
-    database_url = os.getenv("NEON_DATABASE_URL")
+    database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise RuntimeError("NEON_DATABASE_URL is not set")
+        raise RuntimeError("DATABASE_URL is not set")
     return database_url
 
 

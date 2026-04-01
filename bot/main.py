@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.commands import register_bot_commands
-from bot.config import get_settings
+from bot.config import get_settings, validate_required_env_vars
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.rate_limit import RateLimitMiddleware
@@ -39,12 +39,14 @@ async def on_shutdown(bot: Bot) -> None:
 
 
 async def main() -> None:
-    settings = get_settings()
-
     logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+
+    validate_required_env_vars()
+    settings = get_settings()
+    logging.getLogger().setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
