@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from bot.commands import register_bot_commands
 from bot.config import get_settings
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.logging import LoggingMiddleware
@@ -58,6 +59,8 @@ async def main() -> None:
 
     for router in discover_routers():
         dp.include_router(router)
+
+    await register_bot_commands(bot, settings.admin_ids)
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
