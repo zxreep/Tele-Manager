@@ -1,0 +1,15 @@
+services:
+  - type: worker
+    name: tele-manager-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m bot.main
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./tele_manager.db
+      - key: ADMIN_IDS
+        value: '[111111111,222222222]'
+      - key: LOG_LEVEL
+        value: INFO
