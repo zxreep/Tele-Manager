@@ -9,6 +9,7 @@ from bot.config import get_settings
 from bot.db.session import SessionLocal
 from bot.handlers.admin_panel import ServiceBackedAdminPanelStorage, set_admin_panel_storage
 from bot.handlers.analytics import set_analytics_service
+from bot.handlers import load_registered_routers
 from bot.handlers.premium import set_premium_service
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.logging import LoggingMiddleware
