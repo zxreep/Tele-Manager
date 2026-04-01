@@ -347,10 +347,10 @@ async def premium_remove(message: Message) -> None:
         return
 
     if not removed:
-        await message.answer(f"ℹ️ User <code>{user_id}</code> was not premium.")
+        await message.answer(f"ℹ️ User {html_code(user_id)} was not premium.")
         return
 
-    await message.answer(f"✅ Premium removed for <code>{user_id}</code>.")
+    await message.answer(f"✅ Premium removed for {html_code(user_id)}.")
 
 
 @router.message(Command("premium_list"))
@@ -374,5 +374,5 @@ async def premium_list(message: Message) -> None:
         await message.answer("No premium users.")
         return
 
-    formatted = "\n".join(f"• <code>{user_id}</code>" for user_id in members)
+    formatted = "\n".join(f"• {html_code(user_id)}" for user_id in members)
     await message.answer(f"💎 <b>Premium users</b>\n{formatted}")

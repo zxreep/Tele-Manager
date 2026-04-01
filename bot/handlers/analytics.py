@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from bot.services.analytics_service import AnalyticsService
+from bot.utils import escape_html
 
 router = Router(name=__name__)
 service: AnalyticsService | None = None

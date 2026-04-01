@@ -1,10 +1,7 @@
 import asyncio
-import importlib
 import logging
-import pkgutil
-from collections.abc import Iterable
-
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.commands import register_bot_commands
@@ -21,18 +18,6 @@ from bot.services.group_service import GroupService
 from bot.services.premium_service import PremiumService
 
 logger = logging.getLogger(__name__)
-
-
-def discover_routers(package_name: str = "bot.handlers") -> Iterable:
-    package = importlib.import_module(package_name)
-
-    for _, module_name, is_pkg in pkgutil.iter_modules(package.__path__, package.__name__ + "."):
-        if is_pkg:
-            continue
-        module = importlib.import_module(module_name)
-        router = getattr(module, "router", None)
-        if router is not None:
-            yield router
 
 
 async def on_startup(bot: Bot) -> None:
@@ -52,7 +37,10 @@ async def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    bot = Bot(token=settings.bot_token)
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
     dp = Dispatcher(storage=MemoryStorage())
 
     premium_service = PremiumService(session_factory=SessionLocal)
@@ -71,7 +59,7 @@ async def main() -> None:
 
     dp.message.middleware(RateLimitMiddleware())
 
-    for router in discover_routers():
+    for router in load_registered_routers():
         dp.include_router(router)
 
     await register_bot_commands(bot, settings.admin_ids)
