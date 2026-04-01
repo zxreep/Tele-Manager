@@ -6,11 +6,16 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.commands import register_bot_commands
 from bot.config import get_settings
+from bot.db.session import SessionLocal
+from bot.handlers.admin_panel import ServiceBackedAdminPanelStorage, set_admin_panel_storage
+from bot.handlers.analytics import set_analytics_service
+from bot.handlers.premium import set_premium_service
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.rate_limit import RateLimitMiddleware
-from bot.handlers import load_registered_routers
-
+from bot.services.analytics_service import AnalyticsService
+from bot.services.group_service import GroupService
+from bot.services.premium_service import PremiumService
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +42,14 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode="HTML"),
     )
     dp = Dispatcher(storage=MemoryStorage())
+
+    premium_service = PremiumService(session_factory=SessionLocal)
+    analytics_service = AnalyticsService(session_factory=SessionLocal)
+    _group_service = GroupService(session_factory=SessionLocal)
+
+    set_premium_service(premium_service)
+    set_analytics_service(analytics_service)
+    set_admin_panel_storage(ServiceBackedAdminPanelStorage(premium_service, analytics_service))
 
     dp.message.middleware(LoggingMiddleware())
     dp.callback_query.middleware(LoggingMiddleware())
