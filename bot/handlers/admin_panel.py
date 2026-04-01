@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass
 from datetime import date
@@ -6,8 +7,13 @@ from typing import Dict, List, Optional, Protocol, Set
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy.exc import SQLAlchemyError
+
+from bot.services.analytics_service import AnalyticsService
+from bot.services.premium_service import PremiumService
 
 router = Router(name="admin_panel")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,24 +46,26 @@ class AdminPanelStorage(Protocol):
     async def premium_list(self) -> List[int]: ...
 
 
-class InMemoryAdminPanelStorage:
-    """Fallback implementation used until a DB-backed implementation is wired."""
-
-    def __init__(self) -> None:
-        self._premium_users: Set[int] = set()
+class ServiceBackedAdminPanelStorage:
+    def __init__(self, premium_service: PremiumService, analytics_service: AnalyticsService) -> None:
+        self._premium_service = premium_service
+        self._analytics_service = analytics_service
 
     async def get_user_analytics(self) -> UserAnalytics:
+        snapshot = await self._analytics_service.get_snapshot()
         return UserAnalytics(
-            total_users=0,
-            active_today=0,
-            active_7d=0,
-            active_30d=0,
-            new_users_daily={},
+            total_users=snapshot.get("total_users", 0),
+            active_today=snapshot.get("daily_active_users", 0),
+            active_7d=snapshot.get("weekly_active_users", 0),
+            active_30d=snapshot.get("monthly_active_users", 0),
+            new_users_daily=snapshot.get("new_users_daily", {}),
         )
 
     async def get_group_analytics(self) -> GroupAnalytics:
+        snapshot = await self._analytics_service.get_snapshot()
+        active_groups = snapshot.get("active_groups_24h", 0)
         return GroupAnalytics(
-            active_groups=0,
+            active_groups=active_groups,
             active_channels=0,
             broadcast_sent=0,
             broadcast_delivered=0,
@@ -65,20 +73,16 @@ class InMemoryAdminPanelStorage:
         )
 
     async def premium_add(self, user_id: int, days: int) -> None:
-        del days
-        self._premium_users.add(user_id)
+        await self._premium_service.grant_premium(user_id=user_id, days=days)
 
     async def premium_remove(self, user_id: int) -> bool:
-        if user_id in self._premium_users:
-            self._premium_users.remove(user_id)
-            return True
-        return False
+        return await self._premium_service.revoke_premium(user_id=user_id)
 
     async def premium_list(self) -> List[int]:
-        return sorted(self._premium_users)
+        return await self._premium_service.list_active_premium()
 
 
-storage: AdminPanelStorage = InMemoryAdminPanelStorage()
+storage: AdminPanelStorage | None = None
 
 
 def set_admin_panel_storage(custom_storage: AdminPanelStorage) -> None:
@@ -152,6 +156,10 @@ def _format_daily_trend(daily_values: Dict[date, int]) -> str:
     return "\n".join(lines)
 
 
+def _get_storage() -> AdminPanelStorage | None:
+    return storage
+
+
 @router.message(Command("admin"))
 async def admin_panel(message: Message) -> None:
     if not await _guard_admin(message):
@@ -174,7 +182,18 @@ async def user_analytics(query: CallbackQuery) -> None:
     if not await _guard_admin_callback(query):
         return
 
-    data = await storage.get_user_analytics()
+    current_storage = _get_storage()
+    if current_storage is None:
+        await query.answer("Storage is not configured.", show_alert=True)
+        return
+
+    try:
+        data = await current_storage.get_user_analytics()
+    except SQLAlchemyError:
+        logger.exception("admin.user_analytics.db_error")
+        await query.answer("User analytics unavailable (DB error).", show_alert=True)
+        return
+
     text = (
         "👤 <b>User Analytics</b>\n\n"
         f"Total users: <b>{data.total_users}</b>\n"
@@ -194,7 +213,18 @@ async def group_analytics(query: CallbackQuery) -> None:
     if not await _guard_admin_callback(query):
         return
 
-    data = await storage.get_group_analytics()
+    current_storage = _get_storage()
+    if current_storage is None:
+        await query.answer("Storage is not configured.", show_alert=True)
+        return
+
+    try:
+        data = await current_storage.get_group_analytics()
+    except SQLAlchemyError:
+        logger.exception("admin.group_analytics.db_error")
+        await query.answer("Group analytics unavailable (DB error).", show_alert=True)
+        return
+
     text = (
         "👥 <b>Group Analytics</b>\n\n"
         f"Active groups: <b>{data.active_groups}</b>\n"
@@ -226,7 +256,18 @@ async def premium_members_page(query: CallbackQuery) -> None:
     if not await _guard_admin_callback(query):
         return
 
-    members = await storage.premium_list()
+    current_storage = _get_storage()
+    if current_storage is None:
+        await query.answer("Storage is not configured.", show_alert=True)
+        return
+
+    try:
+        members = await current_storage.premium_list()
+    except SQLAlchemyError:
+        logger.exception("admin.premium_list.db_error")
+        await query.answer("Premium list unavailable (DB error).", show_alert=True)
+        return
+
     body = "\n".join(f"• <code>{user_id}</code>" for user_id in members) if members else "No premium users."
 
     await query.message.edit_text(
@@ -246,6 +287,11 @@ async def premium_add(message: Message) -> None:
     if not await _guard_admin(message):
         return
 
+    current_storage = _get_storage()
+    if current_storage is None:
+        await message.answer("Storage is not configured.")
+        return
+
     parts = message.text.split(maxsplit=2) if message.text else []
     if len(parts) != 3:
         await message.answer("Usage: /premium_add <user_id> <days>")
@@ -262,13 +308,24 @@ async def premium_add(message: Message) -> None:
         await message.answer("days must be greater than 0.")
         return
 
-    await storage.premium_add(user_id=user_id, days=days)
+    try:
+        await current_storage.premium_add(user_id=user_id, days=days)
+    except SQLAlchemyError:
+        logger.exception("admin.premium_add.db_error", extra={"user_id": user_id, "days": days})
+        await message.answer("Could not add premium due to DB error.")
+        return
+
     await message.answer(f"✅ Premium added for <code>{user_id}</code> for <b>{days}</b> days.")
 
 
 @router.message(Command("premium_remove"))
 async def premium_remove(message: Message) -> None:
     if not await _guard_admin(message):
+        return
+
+    current_storage = _get_storage()
+    if current_storage is None:
+        await message.answer("Storage is not configured.")
         return
 
     parts = message.text.split(maxsplit=1) if message.text else []
@@ -282,7 +339,13 @@ async def premium_remove(message: Message) -> None:
         await message.answer("user_id must be an integer.")
         return
 
-    removed = await storage.premium_remove(user_id=user_id)
+    try:
+        removed = await current_storage.premium_remove(user_id=user_id)
+    except SQLAlchemyError:
+        logger.exception("admin.premium_remove.db_error", extra={"user_id": user_id})
+        await message.answer("Could not remove premium due to DB error.")
+        return
+
     if not removed:
         await message.answer(f"ℹ️ User <code>{user_id}</code> was not premium.")
         return
@@ -295,7 +358,18 @@ async def premium_list(message: Message) -> None:
     if not await _guard_admin(message):
         return
 
-    members = await storage.premium_list()
+    current_storage = _get_storage()
+    if current_storage is None:
+        await message.answer("Storage is not configured.")
+        return
+
+    try:
+        members = await current_storage.premium_list()
+    except SQLAlchemyError:
+        logger.exception("admin.premium_list_command.db_error")
+        await message.answer("Could not fetch premium users due to DB error.")
+        return
+
     if not members:
         await message.answer("No premium users.")
         return
