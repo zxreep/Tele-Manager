@@ -12,6 +12,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from bot.handlers.group_management import AdminVerifier, GroupRepository, ManagedChat
+from bot.utils import escape_html, html_code
 
 
 @dataclass(slots=True)
@@ -147,7 +148,7 @@ async def send_one_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         chat_id = int(chat_id_raw)
     except ValueError:
-        await message.reply_text("`chat_id` must be an integer.", parse_mode="Markdown")
+        await message.reply_text("chat_id must be an integer.")
         return
 
     target_repo: BroadcastTargetRepository = context.application.bot_data[
@@ -166,10 +167,13 @@ async def send_one_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
     if result and result[0].success:
-        await message.reply_text(f"✅ Sent to `{chat_id}`", parse_mode="Markdown")
+        await message.reply_text(f"✅ Sent to {html_code(chat_id)}", parse_mode="HTML")
     else:
         err = result[0].error if result else "unknown error"
-        await message.reply_text(f"❌ Failed for `{chat_id}`: {err}", parse_mode="Markdown")
+        await message.reply_text(
+            f"❌ Failed for {html_code(chat_id)}: <code>{escape_html(err)}</code>",
+            parse_mode="HTML",
+        )
 
 
 async def send_many_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

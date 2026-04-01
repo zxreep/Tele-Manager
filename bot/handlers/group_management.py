@@ -14,6 +14,8 @@ from typing import Protocol, Sequence
 from telegram import Chat, Update
 from telegram.ext import ContextTypes
 
+from bot.utils import escape_html, html_code
+
 
 @dataclass(slots=True)
 class ManagedChat:
@@ -128,6 +130,10 @@ async def list_groups_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     lines = ["Manageable groups/channels:"]
     for item in chats:
         handle = f"@{item.username}" if item.username else "(no public @username)"
-        lines.append(f"• `{item.chat_id}` — {item.title} [{item.chat_type}] {handle}")
+        lines.append(
+            "• "
+            f"{html_code(item.chat_id)} — {escape_html(item.title)} "
+            f"[{escape_html(item.chat_type)}] {escape_html(handle)}"
+        )
 
-    await message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await message.reply_text("\n".join(lines), parse_mode="HTML")

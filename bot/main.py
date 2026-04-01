@@ -5,6 +5,7 @@ import pkgutil
 from collections.abc import Iterable
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.commands import register_bot_commands
@@ -46,7 +47,10 @@ async def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    bot = Bot(token=settings.bot_token)
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode="HTML"),
+    )
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.message.middleware(LoggingMiddleware())
