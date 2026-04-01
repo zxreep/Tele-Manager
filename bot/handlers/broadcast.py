@@ -152,7 +152,7 @@ async def send_one_command(
     try:
         chat_id = int(chat_id_raw)
     except ValueError:
-        await message.answer("`chat_id` must be an integer.", parse_mode="Markdown")
+        await message.reply_text("chat_id must be an integer.")
         return
 
     target_repo = _resolve_target_repository(message.bot, broadcast_target_repository)
@@ -172,10 +172,13 @@ async def send_one_command(
     )
 
     if result and result[0].success:
-        await message.answer(f"✅ Sent to `{chat_id}`", parse_mode="Markdown")
+        await message.reply_text(f"✅ Sent to {html_code(chat_id)}", parse_mode="HTML")
     else:
         err = result[0].error if result else "unknown error"
-        await message.answer(f"❌ Failed for `{chat_id}`: {err}", parse_mode="Markdown")
+        await message.reply_text(
+            f"❌ Failed for {html_code(chat_id)}: <code>{escape_html(err)}</code>",
+            parse_mode="HTML",
+        )
 
 
 @router.message(Command("send_many"))

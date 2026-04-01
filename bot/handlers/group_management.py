@@ -12,6 +12,8 @@ from aiogram.types import Chat, ChatMemberUpdated, Message
 
 router = Router(name="group_management")
 
+from bot.utils import escape_html, html_code
+
 
 @dataclass(slots=True)
 class ManagedChat:
@@ -129,6 +131,10 @@ async def list_groups_command(
     lines = ["Manageable groups/channels:"]
     for item in chats:
         handle = f"@{item.username}" if item.username else "(no public @username)"
-        lines.append(f"• `{item.chat_id}` — {item.title} [{item.chat_type}] {handle}")
+        lines.append(
+            "• "
+            f"{html_code(item.chat_id)} — {escape_html(item.title)} "
+            f"[{escape_html(item.chat_type)}] {escape_html(handle)}"
+        )
 
-    await message.answer("\n".join(lines), parse_mode="Markdown")
+    await message.reply_text("\n".join(lines), parse_mode="HTML")
